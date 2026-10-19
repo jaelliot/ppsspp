@@ -82,6 +82,41 @@ an error with the request and does not report a request outcome through its exit
 
 Type `:help` in the REPL for a quick reminder, `:quit` to disconnect.
 
+### Waiting for a save-state result
+
+`game.state.save path=checkpoint.ppst wait=true` and the corresponding `game.state.load`
+request wait for completion on servers that support save-state results. A `deferred` reply
+only acknowledges acceptance. wsdbg keeps waiting for the original event with `status` of
+`success` or `warning`, or a ticket-matched `error`. A warning still means the load completed.
+Errors, including `failed` and `abandoned` results, make the command or script exit non-zero.
+Messages may be localized; wsdbg uses the event/status fields rather than their wording.
+
+One-shot mode uses `--wait`; `--sync` uses `--sync-timeout`. `--wait-all` still listens for its
+full interval, but an awaited save/load must receive a terminal result to succeed. A queue-only
+reply from an older server, or an unrecognized completion status, is reported as unsupported
+and exits non-zero. Omitting `wait` or using `wait=false` retains the queue acknowledgement
+behavior. `--raw` requests without a numeric ticket remain observational.
+
+Waiting does not advance the CPU. For a paused emulator, send the operation without blocking,
+then send an execution command with its own ticket:
+
+```text
+# wsdbg PORT --sync --compact < script.txt
+:nowait game.state.save path=checkpoint.ppst wait=true
+cpu.runUntilTime relativeUs=1000
+:quit
+```
+
+The pending save/load result is observed even while another command, `:sleep`, or `:wait` is
+reading replies. EOF and `:quit` retain the existing drain of up to ten seconds for outstanding
+requests. An awaited save/load still unresolved then, or when the connection closes, makes
+the script exit non-zero with an unknown outcome. A timeout, disconnect, or `abandoned` result
+does not prove cancellation or absence of side effects. Completion does not stop further CPU
+execution. Use distinct numeric tickets for raw requests; reusing a live ticket involved in
+an awaited save/load is rejected, and automatic tickets skip outstanding requests.
+Shorthand `ticket=` overrides must remain non-negative integers; use `--raw` without a
+numeric ticket when observation without a correlated outcome is intentional.
+
 ## Scripting a multi-step sequence
 
 Piping several commands into the REPL (`(echo cmd1; echo cmd2; ...) | wsdbg PORT`) sends them all
