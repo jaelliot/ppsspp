@@ -1,0 +1,48 @@
+name: wsdbg pending-disconnect regression
+
+on:
+  push:
+    branches:
+      - codex/wsdbg-validation-22700
+
+permissions:
+  contents: read
+
+jobs:
+  wsdbg-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 5
+          submodules: false
+
+      - name: Show Rust toolchain
+        run: |
+          rustc --version
+          cargo --version
+
+      - name: Build published wsdbg patch
+        run: cargo build --locked --manifest-path Tools/wsdbg/Cargo.toml
+
+      - name: Install isolated Python WebSocket test dependency
+        run: |
+          python3 -m venv /tmp/wsdbg-probe-venv
+          /tmp/wsdbg-probe-venv/bin/python -m pip install --disable-pip-version-check websockets==16.0
+
+      - name: Verify six ticket-completion and disconnect outcomes
+        run: |
+          /tmp/wsdbg-probe-venv/bin/python .github/wsdbg-validation/probe_wsdbg_disconnect.py Tools/wsdbg/target/debug/wsdbg
+
+      - name: Verify negative control fails on unpatched upstream head
+        run: |
+          git show HEAD~3:Tools/wsdbg/src/main.rs > Tools/wsdbg/src/main.rs
+          cargo build --locked --manifest-path Tools/wsdbg/Cargo.toml
+          if /tmp/wsdbg-probe-venv/bin/python .github/wsdbg-validation/probe_wsdbg_disconnect.py Tools/wsdbg/target/debug/wsdbg > /tmp/wsdbg-negative.log 2>&1; then
+            echo "ERROR: The unpatched parent unexpectedly passed the disconnect regression."
+            cat /tmp/wsdbg-negative.log
+            exit 1
+          fi
+          cat /tmp/wsdbg-negative.log
+          grep -F "mode='missing'" /tmp/wsdbg-negative.log
